@@ -1,0 +1,126 @@
+:root {
+  --sc-primary: #1a3a5c;
+  --sc-secondary: #e63946;
+  --sc-sidebar-width: 250px;
+}
+
+body {
+  background-color: #f4f6f9;
+  font-family: 'Segoe UI', sans-serif;
+}
+
+/* ── Sidebar ── */
+.sidebar {
+  width: var(--sc-sidebar-width);
+  min-height: 100vh;
+  background: var(--sc-primary);
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 100;
+  transition: width 0.2s;
+  overflow-y: auto;
+}
+
+.sidebar .brand {
+  padding: 1.2rem 1rem;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.sidebar .brand h5 {
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.sidebar .brand small {
+  color: rgba(255,255,255,0.6);
+  font-size: 0.72rem;
+}
+
+.sidebar .nav-link {
+  color: rgba(255,255,255,0.75);
+  padding: 0.65rem 1.2rem;
+  border-radius: 6px;
+  margin: 2px 8px;
+  transition: all 0.15s;
+  font-size: 0.9rem;
+}
+
+.sidebar .nav-link:hover,
+.sidebar .nav-link.active {
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+}
+
+.sidebar .nav-link i {
+  width: 22px;
+  text-align: center;
+  margin-right: 8px;
+}
+
+/* ── Main content ── */
+.main-content {
+  margin-left: var(--sc-sidebar-width);
+  min-height: 100vh;
+}
+
+/* ── Topbar ── */
+.topbar {
+  background: #fff;
+  border-bottom: 1px solid #e9ecef;
+  padding: 0.75rem 1.5rem;
+  position: sticky;
+  top: 0;
+  z-index: 99;
+}
+
+/* ── Cards ── */
+.stat-card {
+  border: none;
+  border-radius: 12px;
+  transition: transform 0.15s;
+}
+.stat-card:hover { transform: translateY(-2px); }
+
+.stat-card .icon-box {
+  width: 50px;
+  height: 50px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+}
+
+/* ── Badges de rôle ── */
+.badge-etudiant  { background-color: #0d6efd; }
+.badge-enseignant{ background-color: #198754; }
+.badge-admin     { background-color: #dc3545; }
+
+/* ── Table actions ── */
+.btn-action {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+/* ── Emploi du temps ── */
+.edt-table th { background: var(--sc-primary); color: #fff; text-align: center; }
+.edt-cell {
+  background: #e8f4fd;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+  border-left: 3px solid #0d6efd;
+  margin: 2px;
+}
+.edt-cell.cm { border-color: #0d6efd; background: #e8f0fe; }
+.edt-cell.td { border-color: #198754; background: #e8f5e9; }
+.edt-cell.tp { border-color: #fd7e14; background: #fff3e0; }
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .sidebar { width: 0; }
+  .main-content { margin-left: 0; }
+}
