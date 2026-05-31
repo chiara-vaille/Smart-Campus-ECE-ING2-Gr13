@@ -13,7 +13,7 @@ switch ($method) {
         $id_cours = $_GET['id_cours'] ?? null;
         if (!$id_cours) { http_response_code(400); echo json_encode(['message' => 'id_cours requis.']); exit; }
 
-        // Types d'évaluation du cours
+        // Types d'éval
         $evals = $pdo->prepare("SELECT * FROM TypeEvaluation WHERE id_cours=? ORDER BY id_type_eval");
         $evals->execute([$id_cours]);
         $evaluations = $evals->fetchAll();
