@@ -20,7 +20,6 @@ if (!$email || !$password) {
 
 
 
-
 $pdo = getDB();
 $stmt = $pdo->prepare("SELECT u.*, e.id_etudiant, en.id_enseignant FROM Utilisateur u
     LEFT JOIN Etudiant  e  ON e.id_utilisateur = u.id_utilisateur
@@ -35,7 +34,7 @@ if (!$user || !password_verify($password, $user['mot_de_passe'])) {
     exit;
 }
 
-// Stocker en sessions
+// Stocker en session
 $_SESSION['user'] = [
     'id_utilisateur' => $user['id_utilisateur'],
     'id_etudiant'    => $user['id_etudiant'],
