@@ -7,9 +7,9 @@ export function AuthProvider({ children }) {
   const [user, setUser]       = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // Vérifier la session au chargement
+  // Pour vérifier la session au chargement, utilisation de useEffect en dep, l'effet ne s'execute qu'une suele fois au montage 
   useEffect(() => {
-    api.get('/auth/me.php')
+    api.get('/auth/me.php') //recup de l'utilisateur connecté 
       .then(res => setUser(res.data.user))
       .catch(() => setUser(null))
       .finally(() => setLoading(false))
@@ -25,12 +25,12 @@ export function AuthProvider({ children }) {
     await api.post('/auth/logout.php')
     setUser(null)
   }
-
+//fonction login et logout
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout }}> 
       {children}
     </AuthContext.Provider>
   )
 }
-
+//valeur partagé à toute l'appli 
 export const useAuth = () => useContext(AuthContext)
