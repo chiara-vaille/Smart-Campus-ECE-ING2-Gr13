@@ -3,105 +3,120 @@ require_once __DIR__ . '/../../middleware/cors.php';
 require_once __DIR__ . '/../../middleware/auth.php';
 require_once __DIR__ . '/../../config/database.php';
 
-if ($_SERVER['REQUEST_METHOD'] !== 'GET') { http_response_code(405); exit; }
-$user = requireAuth();
-$pdo  = getDB();
+$method = $_SERVER['REQUEST_METHOD'];
+$pdo    = getDB();
+$user   = requireAuth();
 
-if ($user['role'] === 'admin') {
-    // Statistiques globales
-    $stats = [];
-    $stats['etudiants']    = $pdo->query("SELECT COUNT(*) FROM Etudiant")->fetchColumn();
-    $stats['enseignants']  = $pdo->query("SELECT COUNT(*) FROM Enseignant")->fetchColumn();
-    $stats['cours']        = $pdo->query("SELECT COUNT(*) FROM Cours WHERE statut='actif'")->fetchColumn();
-    $stats['inscriptions'] = $pdo->query("SELECT COUNT(*) FROM Inscription WHERE statut='inscrit'")->fetchColumn();
+switch ($method) {
 
-    // Répartition par niveau
-    $stmt = $pdo->query("SELECT niveau, COUNT(*) AS count FROM Etudiant GROUP BY niveau ORDER BY niveau");
-    $stats['niveaux'] = $stmt->fetchAll();
+    case 'GET':
+        if ($user['role'] === 'enseignant') {
+            // Enseignant : seulement ses cours
+            $stmt = $pdo->prepare("
+                SELECT c.*,
+                    u.nom AS enseignant_nom, u.prenom AS enseignant_prenom,
+                    (SELECT COUNT(*) FROM Inscription i WHERE i.id_cours = c.id_cours AND i.statut = 'inscrit') AS nb_inscrits
+                FROM Cours c
+                LEFT JOIN Enseignant en ON en.id_enseignant = c.id_enseignant
+                LEFT JOIN Utilisateur u ON u.id_utilisateur = en.id_utilisateur
+                WHERE c.id_enseignant = ?
+                ORDER BY c.niveau, c.code_cours
+            ");
+            $stmt->execute([$user['id_enseignant']]);
+        } elseif ($user['role'] === 'etudiant') {
+            // Étudiant : tous les cours actifs
+            $stmt = $pdo->prepare("
+                SELECT c.*,
+                    u.nom AS enseignant_nom, u.prenom AS enseignant_prenom,
+                    (SELECT COUNT(*) FROM Inscription i WHERE i.id_cours = c.id_cours AND i.statut = 'inscrit') AS nb_inscrits
+                FROM Cours c
+                LEFT JOIN Enseignant en ON en.id_enseignant = c.id_enseignant
+                LEFT JOIN Utilisateur u ON u.id_utilisateur = en.id_utilisateur
+                WHERE c.statut = 'actif'
+                ORDER BY c.niveau, c.code_cours
+            ");
+            $stmt->execute();
+        } else {
+            // Admin : tous les cours
+            $stmt = $pdo->query("
+                SELECT c.*,
+                    u.nom AS enseignant_nom, u.prenom AS enseignant_prenom,
+                    (SELECT COUNT(*) FROM Inscription i WHERE i.id_cours = c.id_cours AND i.statut = 'inscrit') AS nb_inscrits
+                FROM Cours c
+                LEFT JOIN Enseignant en ON en.id_enseignant = c.id_enseignant
+                LEFT JOIN Utilisateur u ON u.id_utilisateur = en.id_utilisateur
+                ORDER BY c.niveau, c.code_cours
+            ");
+        }
+        echo json_encode(['cours' => $stmt->fetchAll()]);
+        break;
 
-    // Activité récente (inscriptions récentes)
-    $stmt = $pdo->query("
-        SELECT CONCAT(u.prenom, ' ', u.nom, ' inscrit à ', c.nom) AS description,
-               DATE_FORMAT(i.date_inscription, '%d/%m %H:%i') AS date
-        FROM Inscription i
-        JOIN Etudiant e ON e.id_etudiant = i.id_etudiant
-        JOIN Utilisateur u ON u.id_utilisateur = e.id_utilisateur
-        JOIN Cours c ON c.id_cours = i.id_cours
-        ORDER BY i.date_inscription DESC LIMIT 8
-    ");
-    $stats['activite'] = $stmt->fetchAll();
+    case 'POST':
+        requireRole(['admin']);
+        $d = json_decode(file_get_contents('php://input'), true);
+        foreach (['code_cours','nom'] as $f) {
+            if (empty($d[$f])) { http_response_code(400); echo json_encode(['message' => "Champ requis : $f"]); exit; }
+        }
+        // Unicité code_cours
+        $chk = $pdo->prepare("SELECT COUNT(*) FROM Cours WHERE code_cours = ?");
+        $chk->execute([$d['code_cours']]);
+        if ($chk->fetchColumn() > 0) { http_response_code(409); echo json_encode(['message' => 'Ce code cours est déjà utilisé.']); exit; }
 
-    echo json_encode($stats);
+        $stmt = $pdo->prepare("INSERT INTO Cours (code_cours,nom,description,credits,coefficient,capacite_max,semestre,niveau,departement,id_enseignant,annee_academique,statut)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,'actif')");
+        $stmt->execute([
+            $d['code_cours'], $d['nom'], $d['description'] ?? null,
+            $d['credits'] ?? 0, $d['coefficient'] ?? 1.0, $d['capacite_max'] ?? 30,
+            $d['semestre'] ?? 'S1', $d['niveau'] ?? 'L1', $d['departement'] ?? null,
+            $d['id_enseignant'] ?: null, $d['annee_academique'] ?? '2025-2026'
+        ]);
+        http_response_code(201);
+        echo json_encode(['message' => 'Cours créé.', 'id_cours' => $pdo->lastInsertId()]);
+        break;
 
-} elseif ($user['role'] === 'enseignant') {
-    $id_e = $user['id_enseignant'];
-    $stats = [];
-    $stats['cours']     = $pdo->prepare("SELECT COUNT(*) FROM Cours WHERE id_enseignant=? AND statut='actif'")->execute([$id_e]) ? $pdo->query("SELECT COUNT(*) FROM Cours WHERE id_enseignant=$id_e AND statut='actif'")->fetchColumn() : 0;
-    $stats['etudiants'] = $pdo->query("SELECT COUNT(DISTINCT i.id_etudiant) FROM Inscription i JOIN Cours c ON c.id_cours=i.id_cours WHERE c.id_enseignant=$id_e")->fetchColumn();
+    case 'PUT':
+        requireRole(['admin','enseignant']);
+        $d = json_decode(file_get_contents('php://input'), true);
+        if (empty($d['id_cours'])) { http_response_code(400); echo json_encode(['message' => 'id_cours requis.']); exit; }
 
-    // Notes manquantes (inscriptions sans notes pour une éval)
-    $stats['notes_manquantes'] = $pdo->query("
-        SELECT COUNT(*) FROM Inscription i
-        JOIN Cours c ON c.id_cours=i.id_cours
-        JOIN TypeEvaluation te ON te.id_cours=c.id_cours
-        WHERE c.id_enseignant=$id_e
-        AND NOT EXISTS (SELECT 1 FROM Note n WHERE n.id_etudiant=i.id_etudiant AND n.id_type_eval=te.id_type_eval)
-    ")->fetchColumn();
+        // Enseignant ne peut modifier que ses propres cours
+        if ($user['role'] === 'enseignant') {
+            $chk = $pdo->prepare("SELECT id_enseignant FROM Cours WHERE id_cours = ?");
+            $chk->execute([$d['id_cours']]);
+            $c = $chk->fetch();
+            if (!$c || $c['id_enseignant'] != $user['id_enseignant']) {
+                http_response_code(403); echo json_encode(['message' => 'Non autorisé.']); exit;
+            }
+        }
 
-    // Séances cette semaine
-    $stats['seances'] = $pdo->query("SELECT COUNT(*) FROM Seance s JOIN Cours c ON c.id_cours=s.id_cours WHERE c.id_enseignant=$id_e")->fetchColumn();
+        $stmt = $pdo->prepare("UPDATE Cours SET code_cours=?,nom=?,description=?,credits=?,coefficient=?,capacite_max=?,semestre=?,niveau=?,departement=?,id_enseignant=?,annee_academique=? WHERE id_cours=?");
+        $stmt->execute([
+            $d['code_cours'], $d['nom'], $d['description'] ?? null,
+            $d['credits'] ?? 0, $d['coefficient'] ?? 1.0, $d['capacite_max'] ?? 30,
+            $d['semestre'] ?? 'S1', $d['niveau'] ?? 'L1', $d['departement'] ?? null,
+            $d['id_enseignant'] ?: null, $d['annee_academique'] ?? '2025-2026',
+            $d['id_cours']
+        ]);
+        echo json_encode(['message' => 'Cours modifié.']);
+        break;
 
-    // Liste des cours
-    $stmt = $pdo->prepare("
-        SELECT c.*, (SELECT COUNT(*) FROM Inscription i WHERE i.id_cours=c.id_cours AND i.statut='inscrit') AS nb_inscrits
-        FROM Cours c WHERE c.id_enseignant=? ORDER BY c.code_cours
-    ");
-    $stmt->execute([$id_e]);
-    $stats['liste_cours'] = $stmt->fetchAll();
+    case 'DELETE':
+        requireRole(['admin']);
+        $d = json_decode(file_get_contents('php://input'), true);
+        if (empty($d['id_cours'])) { http_response_code(400); echo json_encode(['message' => 'id_cours requis.']); exit; }
 
-    echo json_encode($stats);
+        // Archiver plutôt que supprimer si des inscriptions existent
+        $chk = $pdo->prepare("SELECT COUNT(*) FROM Inscription WHERE id_cours = ?");
+        $chk->execute([$d['id_cours']]);
+        if ($chk->fetchColumn() > 0) {
+            $pdo->prepare("UPDATE Cours SET statut='archive' WHERE id_cours=?")->execute([$d['id_cours']]);
+            echo json_encode(['message' => 'Cours archivé (des inscriptions existaient).']);
+        } else {
+            $pdo->prepare("DELETE FROM Cours WHERE id_cours=?")->execute([$d['id_cours']]);
+            echo json_encode(['message' => 'Cours supprimé.']);
+        }
+        break;
 
-} else {
-    // Étudiant
-    $id_etudiant = $user['id_etudiant'];
-    $stats = [];
-    $stats['cours']   = $pdo->query("SELECT COUNT(*) FROM Inscription WHERE id_etudiant=$id_etudiant AND statut='inscrit'")->fetchColumn();
-    $stats['absences'] = $pdo->query("SELECT COUNT(*) FROM Presence WHERE id_etudiant=$id_etudiant AND statut='absent'")->fetchColumn();
-    $stats['credits'] = $pdo->query("
-        SELECT COALESCE(SUM(c.credits),0) FROM Inscription i JOIN Cours c ON c.id_cours=i.id_cours
-        WHERE i.id_etudiant=$id_etudiant AND i.statut='valide'
-    ")->fetchColumn();
-
-    // Moyenne générale
-    $stmt = $pdo->query("
-        SELECT AVG(n.valeur * te.coefficient / (SELECT SUM(te2.coefficient) FROM TypeEvaluation te2 WHERE te2.id_cours=te.id_cours))
-        FROM Note n JOIN TypeEvaluation te ON te.id_type_eval=n.id_type_eval
-        WHERE n.id_etudiant=$id_etudiant
-    ");
-    $moy = $stmt->fetchColumn();
-    $stats['moyenne'] = $moy !== null ? round($moy * 20, 2) : null;
-
-    // Notes récentes
-    $stmt = $pdo->query("
-        SELECT c.nom AS cours, te.nom AS type_eval, n.valeur
-        FROM Note n
-        JOIN TypeEvaluation te ON te.id_type_eval=n.id_type_eval
-        JOIN Cours c ON c.id_cours=te.id_cours
-        WHERE n.id_etudiant=$id_etudiant
-        ORDER BY n.date_saisie DESC LIMIT 5
-    ");
-    $stats['notes'] = $stmt->fetchAll();
-
-    // Prochaines séances
-    $stmt = $pdo->query("
-        SELECT c.nom AS cours, s.jour_semaine AS jour, s.heure_debut, s.heure_fin, s.salle
-        FROM Seance s JOIN Cours c ON c.id_cours=s.id_cours
-        JOIN Inscription i ON i.id_cours=c.id_cours
-        WHERE i.id_etudiant=$id_etudiant AND i.statut='inscrit'
-        ORDER BY FIELD(s.jour_semaine,'Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'), s.heure_debut
-        LIMIT 5
-    ");
-    $stats['prochaines_seances'] = $stmt->fetchAll();
-
-    echo json_encode($stats);
+    default:
+        http_response_code(405); echo json_encode(['message' => 'Méthode non autorisée.']);
 }
