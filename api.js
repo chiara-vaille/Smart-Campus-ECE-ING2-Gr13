@@ -1,5 +1,5 @@
 import axios from 'axios'
-
+//config axios
 const api = axios.create({
   baseURL: '/api',
   withCredentials: true,         // pour envoyer les cookies de session PHP
@@ -19,4 +19,4 @@ api.interceptors.response.use(
   }
 )
 
-export default api
+export default api //interception ou export de l'api 
